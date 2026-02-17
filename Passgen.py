@@ -8,8 +8,8 @@ UI polish:
 - Colored banner (brand "hexsec", Telegram "hexsec_tools")
 - Consistent themed colors for titles, prompts, notices, and success messages
 - Clean spacing, panels, and dividers
-- Styled inputs via Rich (falls back to plain input if Rich isn't available)
-- All-English interface & ASCII-safe output
+- Styled inputs via Rich (falls back to plain input if Rich is not available)
+- All-English interface and ASCII-safe output
 
 Usage:
   $ python passenger.py
@@ -19,6 +19,7 @@ import itertools
 import re
 import shutil
 from datetime import datetime
+from pathlib import Path
 
 # ====== App identity ======
 BRAND = "hexsec"
@@ -39,7 +40,7 @@ MAX_COMBO_TOKENS = 3          # 2-3 is practical
 ADD_LEET = True               # leetspeak variants
 ADD_CASE_VARIANTS = True      # lower/UPPER/Capitalized/Camel
 ADD_SEPARATORS = True         # -, _, .
-ADD_NUM_TAILS = True          # 00..99 & recent years
+ADD_NUM_TAILS = True          # 00..99 and recent years
 MIN_LEN = 7
 MAX_LEN = 24
 OUTPUT_FILE = "wordlist.txt"
@@ -73,13 +74,13 @@ try:
     from rich.table import Table
     RICH_OK = True
     console = Console()
-except Exception:  # fallback to plain stdout
+except Exception:
     RICH_OK = False
 # ===================================
 
 
 def show_banner():
-    """Render the banner + program & Telegram panels."""
+    """Render the banner + program and Telegram panels."""
     width = shutil.get_terminal_size((80, 24)).columns
     if not RICH_OK:
         print()
@@ -89,17 +90,14 @@ def show_banner():
         print("-" * width)
         return
 
-    # Brand label
     brand_label = Text(BRAND.upper(), style=THEME["brand"])
 
-    # Main ASCII block with gradient
     line_text = Text(ASCII_LINE)
     try:
         line_text.apply_gradient(THEME["gradient_from"], THEME["gradient_to"])
     except Exception:
         line_text.stylize(THEME["brand"])
 
-    # Program panel
     prog_panel = Panel(
         Text(f"{PROGRAM_NAME}", style=THEME["label"]),
         title="program",
@@ -112,7 +110,6 @@ def show_banner():
         width=min(40, max(28, width // 3)),
     )
 
-    # Telegram panel
     tg = Text()
     tg.append("Telegram: ", style="bold bright_green")
     tg.append(TELEGRAM, style="bold bright_cyan")
@@ -123,7 +120,7 @@ def show_banner():
         padding=(0, 2),
         title="connect",
         title_align="left",
-        subtitle=f"© {BRAND}",
+        subtitle=f"copyright {BRAND}",
         subtitle_align="right",
         width=min(max(34, len("Telegram: " + TELEGRAM) + 6), max(46, width // 2)),
     )
@@ -146,7 +143,6 @@ def quick_help():
         print(f"  4) Output saved to '{OUTPUT_FILE}'.\n")
         return
 
-    # Two-column table for crisp look
     t = Table.grid(padding=(0, 1))
     t.add_column(justify="right", style=THEME["muted"])
     t.add_column()
@@ -166,23 +162,39 @@ def styled_input(prompt: str, hint: str = "") -> str:
     return console.input(f"[{THEME['prompt']}]{prompt}[/]{hint_part} ").strip()
 
 
+def resolve_output_path(base: str) -> str:
+    """Return base filename if it does not exist, otherwise append a timestamp to avoid silent overwrite."""
+    p = Path(base)
+    if not p.exists():
+        return base
+    stem = p.stem
+    suffix = p.suffix
+    timestamp = datetime.now().strftime("%H%M%S")
+    return f"{stem}_{timestamp}{suffix}"
+
+
 # ====== Wordlist core ======
 LEET_MAP = str.maketrans({
-    'a':'4','A':'4',
-    'e':'3','E':'3',
-    'i':'1','I':'1',
-    'o':'0','O':'0',
-    's':'5','S':'5',
-    't':'7','T':'7',
-    'b':'8','B':'8'
+    'a': '4', 'A': '4',
+    'e': '3', 'E': '3',
+    'i': '1', 'I': '1',
+    'o': '0', 'O': '0',
+    's': '5', 'S': '5',
+    't': '7', 'T': '7',
+    'b': '8', 'B': '8',
 })
 
+
 def clean_token(s: str) -> str:
-    """Keep only ASCII alphanumerics plus dot/underscore/dash."""
+    """Keep only ASCII alphanumerics for name fields.
+    Dots, underscores and dashes are intentionally stripped here because
+    separators are added later by with_separators(), not taken from raw input.
+    """
     s = s.strip()
     s = re.sub(r"\s+", "", s)
-    s = re.sub(r"[^0-9A-Za-z._-]", "", s)
+    s = re.sub(r"[^0-9A-Za-z]", "", s)
     return s
+
 
 def case_variants(s: str):
     """lower/UPPER/Capitalized/Camel."""
@@ -196,30 +208,31 @@ def case_variants(s: str):
         variants.add(camel.lower())
     return variants
 
+
 def leet_variants(s: str):
     """Simple leetspeak mapping."""
     return {s, s.translate(LEET_MAP)}
 
+
 def with_separators(tokens):
-    """Join tokens with several separators."""
-    if len(tokens) == 1:
-        return {tokens[0]}
-    seps = ['','-','_','.'] if ADD_SEPARATORS else ['']
-    out = {''.join(tokens)} if '' in seps else set()
-    for sep in seps:
-        out.add(sep.join(tokens))
-    return out
+    """Join a tuple of tokens with each separator and return all joined forms."""
+    seps = ['', '-', '_', '.'] if ADD_SEPARATORS else ['']
+    return {sep.join(tokens) for sep in seps}
+
 
 def add_numeric_tails(words, tails):
-    """Append numeric tails to each word."""
+    """Append numeric tails to each word.
+    Only call this on the pre-tail snapshot to avoid exponential growth.
+    """
     out = set(words)
     for w in words:
         for t in tails:
             out.add(f"{w}{t}")
     return out
 
+
 def unique_len_filtered(words):
-    """Unique + length range filter."""
+    """Deduplicate and filter by configured length range."""
     return {w for w in set(words) if MIN_LEN <= len(w) <= MAX_LEN}
 # ===========================
 
@@ -227,40 +240,53 @@ def unique_len_filtered(words):
 def run_wizard():
     """Interactive, styled wordlist wizard."""
     if RICH_OK:
-        console.print("[bold]=== passenger • Wordlist Generator ===[/]\n")
+        console.print("[bold]=== passenger - Wordlist Generator ===[/]\n")
 
-    name = styled_input("First name:", "ASCII only")
-    surname = styled_input("Last name:", "ASCII only")
+    name = styled_input("First name:", "alpha only")
+    surname = styled_input("Last name:", "alpha only")
     nickname = styled_input("Nickname:", "optional")
     team = styled_input("Team:", "optional")
     date_str = styled_input("Date:", "dd/mm/yyyy or ddmmyyyy")
 
-    # Clean tokens
+    # Clean name-type tokens (alpha only, separators added later)
     tokens = [clean_token(x) for x in [name, surname, nickname, team] if x.strip()]
+    tokens = [t for t in tokens if t]
+    tokens = list(dict.fromkeys(tokens))  # unique, preserve order
 
-    # Parse date
-    date_tokens = set()
+    # Parse date into numeric fragments used only as tails, not as main tokens.
+    # This prevents date fragments from being permuted with name tokens which
+    # produced semantically garbage combinations in the original logic.
+    date_tails = []
     if date_str:
         ds = re.sub(r"[^\d]", "", date_str)
         day = month = year = ""
         if len(ds) == 8:
             day, month, year = ds[:2], ds[2:4], ds[4:]
-        elif len(ds) == 6:  # ddmmyy
+        elif len(ds) == 6:
             day, month, yy = ds[:2], ds[2:4], ds[4:]
             year = "19" + yy
-            date_tokens.add("20" + yy)
-        for x in [day, month, year, ds]:
-            if x:
-                date_tokens.add(x)
+            date_tails.append("20" + yy)
+        for fragment in [day, month, year, ds]:
+            if fragment:
+                date_tails.append(fragment)
         if day and month and year:
-            date_tokens.update({day+month, month+day, day+month+year, year+month+day})
-    tokens.extend(sorted(date_tokens))
+            date_tails.extend([
+                day + month,
+                month + day,
+                day + month + year,
+                year + month + day,
+            ])
+        # deduplicate while keeping order
+        seen = set()
+        unique_date_tails = []
+        for item in date_tails:
+            if item not in seen:
+                seen.add(item)
+                unique_date_tails.append(item)
+        date_tails = unique_date_tails
 
-    # Base combinations
+    # Build base combinations from name tokens only
     base = set()
-    tokens = [t for t in tokens if t]
-    tokens = list(dict.fromkeys(tokens))  # unique, keep order
-
     for r in range(1, min(MAX_COMBO_TOKENS, len(tokens)) + 1):
         for combo in itertools.permutations(tokens, r):
             for joined in with_separators(combo):
@@ -276,26 +302,31 @@ def run_wizard():
             variants = set().union(*(leet_variants(x) for x in variants))
         expanded.update(variants)
 
-    # Numeric tails
+    # Numeric tails: built once and applied to the pre-tail snapshot only.
+    # Applying tails to an already-tailed set causes exponential size growth
+    # which is a memory hazard, especially on Termux.
     if ADD_NUM_TAILS:
-        tails = [str(i) for i in range(0, 100)]
         try:
             now_year = datetime.now().year
         except Exception:
             now_year = 2025
-        tails += [str(y) for y in range(now_year-10, now_year+1)]
-        expanded = add_numeric_tails(expanded, tails)
+        tails = [str(i).zfill(2) for i in range(0, 100)]
+        tails += [str(y) for y in range(now_year - 10, now_year + 1)]
+        tails += date_tails  # date fragments appended here, not to token pool
+        base_snapshot = set(expanded)
+        expanded = add_numeric_tails(base_snapshot, tails)
 
-    # Filter & save
+    # Filter and save
     final_words = unique_len_filtered(expanded)
+    output_path = resolve_output_path(OUTPUT_FILE)
 
-    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+    with open(output_path, "w", encoding="utf-8") as f:
         for w in sorted(final_words):
             f.write(w + "\n")
 
     # Summary
     if not RICH_OK:
-        print(f"\n[OK] Generated {len(final_words)} words in '{OUTPUT_FILE}'.")
+        print(f"\n[OK] Generated {len(final_words)} words in '{output_path}'.")
         return
 
     console.print()
@@ -306,21 +337,27 @@ def run_wizard():
     stats = Table.grid(padding=(0, 1))
     stats.add_column(style=THEME["muted"], justify="right")
     stats.add_column()
-    stats.add_row("Output:", OUTPUT_FILE)
+    stats.add_row("Output:", output_path)
     stats.add_row("Case:", "on" if ADD_CASE_VARIANTS else "off")
     stats.add_row("Leet:", "on" if ADD_LEET else "off")
     stats.add_row("Separators:", "on" if ADD_SEPARATORS else "off")
     stats.add_row("Num tails:", "on" if ADD_NUM_TAILS else "off")
     console.print(stats)
     console.print(Rule(style=THEME["muted"]))
-    console.print(Text("Use responsibly (lawful/ethical purposes only).", style=THEME["warn"]))
+    console.print(Text("Use responsibly (lawful and ethical purposes only).", style=THEME["warn"]))
     console.print()
 
 
 def main():
     show_banner()
     quick_help()
-    run_wizard()
+    try:
+        run_wizard()
+    except (KeyboardInterrupt, EOFError):
+        if RICH_OK:
+            console.print("\n[bold red]Aborted.[/]")
+        else:
+            print("\nAborted.")
 
 
 if __name__ == "__main__":
